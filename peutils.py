@@ -46,7 +46,7 @@ class SignatureDatabase:
         # RegExp to match a signature block
         #
         self.parse_sig = re.compile(
-            '\[(.*?)\]\s+?signature\s*=\s*(.*?)(\s+\?\?)*\s*ep_only\s*=\s*(\w+)(?:\s*section_start_only\s*=\s*(\w+)|)', re.S)
+            b'\[(.*?)\]\s+?signature\s*=\s*(.*?)(\s+\?\?)*\s*ep_only\s*=\s*(\w+)(?:\s*section_start_only\s*=\s*(\w+)|)', re.S)
 
         # Signature information
         #
@@ -91,9 +91,9 @@ class SignatureDatabase:
             #offset = pe.get_offset_from_rva(section.VirtualAddress)
             offset = section.PointerToRawData
 
-            sig_name = '%s Section(%d/%d,%s)' % (
+            sig_name = b'%s Section(%d/%d,%s)' % (
                 name, idx + 1, len(pe.sections),
-                ''.join([c for c in section.Name if c in string.printable]))
+                b''.join([c for c in section.Name if c in string.printable]))
 
             section_signatures.append(
                 self.__generate_signature(
@@ -101,7 +101,7 @@ class SignatureDatabase:
                     section_start_only=True,
                     sig_length=sig_length) )
 
-        return '\n'.join(section_signatures)+'\n'
+        return b'\n'.join(section_signatures)+b'\n'
 
 
 
@@ -124,19 +124,19 @@ class SignatureDatabase:
 
         data = pe.__data__[offset:offset+sig_length]
 
-        signature_bytes = ' '.join(['%02x' % ord(c) for c in data])
+        signature_bytes = b' '.join([b'%02x' % ord(c) for c in data])
 
         if ep_only == True:
-            ep_only = 'true'
+            ep_only = b'true'
         else:
-            ep_only = 'false'
+            ep_only = b'false'
 
         if section_start_only == True:
-            section_start_only = 'true'
+            section_start_only = b'true'
         else:
-            section_start_only = 'false'
+            section_start_only = b'false'
 
-        signature = '[%s]\nsignature = %s\nep_only = %s\nsection_start_only = %s\n' % (
+        signature = b'[%s]\nsignature = %s\nep_only = %s\nsection_start_only = %s\n' % (
             name, signature_bytes, ep_only, section_start_only)
 
         return signature
@@ -319,7 +319,8 @@ class SignatureDatabase:
         # Walk the bytes in the data and match them
         # against the signature
         #
-        for idx, byte in enumerate ( [ord (b) for b in data] ):
+
+        for idx, byte in enumerate (data):
 
             # If the tree is exhausted...
             #
@@ -402,7 +403,7 @@ class SignatureDatabase:
                 # Get the data for a file
                 #
                 try:
-                    sig_f = open( filename, 'rt' )
+                    sig_f = open( filename, 'rb' )
                     sig_data = sig_f.read()
                     sig_f.close()
                 except IOError:
@@ -419,11 +420,20 @@ class SignatureDatabase:
 
         # Helper function to parse the signature bytes
         #
-        def to_byte(value) :
-            if value == '??' or value == '?0' :
-                return value
-            return int (value, 16)
+        #def to_byte(value) :
+        #    if value == b'??' or value == b'?0' :
+        #        return value
+        #    return int (value, 16)
 
+        def to_byte(value) :
+            if  b'?' in value:  #value == '??' or value == '?0' :
+                return value
+            try:
+                return int (value, 16)
+            except ValueError:
+                print(value)
+                raise
+                return value
 
         # Parse all the signatures in the file
         #
@@ -436,16 +446,16 @@ class SignatureDatabase:
 
             ep_only = ep_only.strip().lower()
 
-            signature = signature.replace('\\n', '').strip()
+            signature = signature.replace(b'\\n', b'').strip()
 
             signature_bytes = [to_byte(b) for b in signature.split()]
 
-            if ep_only == 'true':
+            if ep_only == b'true':
                 ep_only = True
             else:
                 ep_only = False
 
-            if section_start_only == 'true':
+            if section_start_only == b'true':
                 section_start_only = True
             else:
                 section_start_only = False

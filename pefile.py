@@ -37,6 +37,8 @@ import mmap
 import io
 import ordlookup
 
+import entropy
+
 sha1, sha256, sha512, md5 = None, None, None, None
 
 try:
@@ -1146,20 +1148,17 @@ class SectionStructure(Structure):
         if sha1 is not None:
             return sha1( self.get_data() ).hexdigest()
 
-
     def get_hash_sha256(self):
         """Get the SHA-256 hex-digest of the section's data."""
 
         if sha256 is not None:
             return sha256( self.get_data() ).hexdigest()
 
-
     def get_hash_sha512(self):
         """Get the SHA-512 hex-digest of the section's data."""
 
         if sha512 is not None:
             return sha512( self.get_data() ).hexdigest()
-
 
     def get_hash_md5(self):
         """Get the MD5 hex-digest of the section's data."""
@@ -1168,26 +1167,40 @@ class SectionStructure(Structure):
             return md5( self.get_data() ).hexdigest()
 
 
+    # def entropy_H(self, data):
+    #     """Calculate the entropy of a chunk of data."""
+
+    #     if len(data) == 0:
+    #         return 0.0
+
+    #     occurences = array.array('L', [0]*256)
+
+    #     for x in data:
+    #         occurences[ord(chr(x))] += 1
+
+    #     entropy = 0
+    #     for x in occurences:
+    #         if x:
+    #             p_x = float(x) / len(data)
+    #             entropy -= p_x*math.log(p_x, 2)
+
+    #     return entropy
+
+    # def entropy_H(self, data):
+    #     """Calculate the entropy of a chunk of data."""
+    #     n_labels = len(data)
+
+    #     if n_labels <= 1:
+    #         return 0
+
+    #     counts = np.bincount(list(data))
+    #     counts = counts[counts.nonzero()[0]]
+    #     probs = counts / n_labels
+
+    #     return stats.entropy(probs, base=2)
+
     def entropy_H(self, data):
-        """Calculate the entropy of a chunk of data."""
-
-        if len(data) == 0:
-            return 0.0
-
-        occurences = array.array('L', [0]*256)
-
-        for x in data:
-            occurences[ord(chr(x))] += 1
-
-        entropy = 0
-        for x in occurences:
-            if x:
-                p_x = float(x) / len(data)
-                entropy -= p_x*math.log(p_x, 2)
-
-        return entropy
-
-
+        return entropy.shannon_entropy(data)
 
 class DataContainer(object):
     """Generic data container."""
@@ -1198,7 +1211,6 @@ class DataContainer(object):
             bare_setattr(key, value)
 
 
-
 class ImportDescData(DataContainer):
     """Holds import descriptor information.
 
@@ -1206,6 +1218,7 @@ class ImportDescData(DataContainer):
     imports:    list of imported symbols (ImportData instances)
     struct:     IMAGE_IMPORT_DESCRIPTOR structure
     """
+
 
 class ImportData(DataContainer):
     """Holds imported symbol's information.
@@ -1215,7 +1228,6 @@ class ImportData(DataContainer):
     bound:      If the symbol is bound, this contains
                 the address.
     """
-
 
     def __setattr__(self, name, val):
 
@@ -1736,6 +1748,7 @@ class PE:
         self.sections = []
 
         self.__warnings = []
+        self.__generic_warnings = []
 
         self.PE_TYPE = None
 
@@ -1778,6 +1791,7 @@ class PE:
             self.__warnings.append(
                 'Corrupt header "%s" at file offset %d. Exception: %s' % (
                     format[0], file_offset, str(err))  )
+            self.__generic_warnings.append('Corrupt header')
             return None
 
         self.__structures__.append(structure)
@@ -1980,6 +1994,8 @@ class PE:
         if self.OPTIONAL_HEADER.AddressOfEntryPoint <  self.OPTIONAL_HEADER.SizeOfHeaders:
             self.__warnings.append(
                 'SizeOfHeaders is smaller than AddressOfEntryPoint: this file cannot run under Windows 8' )
+            self.__generic_warnings.append(
+                'SizeOfHeaders is smaller than AddressOfEntryPoint: this file cannot run under Windows 8')
 
         # The NumberOfRvaAndSizes is sanitized to stay within
         # reasonable limits so can be casted to an int
@@ -1989,6 +2005,7 @@ class PE:
                 'Suspicious NumberOfRvaAndSizes in the Optional Header. ' +
                 'Normal values are never larger than 0x10, the value is: 0x%x' %
                 self.OPTIONAL_HEADER.NumberOfRvaAndSizes )
+            self.__generic_warnings.append('Suspicious NumberOfRvaAndSizes')
 
         MAX_ASSUMED_VALID_NUMBER_OF_RVA_AND_SIZES = 0x100
         for i in range(int(0x7fffffff & self.OPTIONAL_HEADER.NumberOfRvaAndSizes)):
@@ -1997,7 +2014,7 @@ class PE:
                 break
 
             if len(self.__data__) - offset < 8:
-                data = self.__data__[offset:] + '\0'*8
+                data = self.__data__[offset:] + b'\0'*8
             else:
                 data = self.__data__[offset:offset+MAX_ASSUMED_VALID_NUMBER_OF_RVA_AND_SIZES]
 
@@ -2073,6 +2090,8 @@ class PE:
                     'Possibly corrupt file. AddressOfEntryPoint lies outside the file. ' +
                     'AddressOfEntryPoint: 0x%x' %
                     self.OPTIONAL_HEADER.AddressOfEntryPoint )
+                self.__generic_warnings.append(
+                    'Possibly corrupt file. AddressOfEntryPoint lies outside the file.')
 
         else:
 
@@ -2080,6 +2099,7 @@ class PE:
                 'AddressOfEntryPoint lies outside the sections\' boundaries. ' +
                 'AddressOfEntryPoint: 0x%x' %
                 self.OPTIONAL_HEADER.AddressOfEntryPoint )
+            self.__generic_warnings.append('AddressOfEntryPoint lies outside the sections boundaries.')
 
 
         if not fast_load:
@@ -2144,6 +2164,7 @@ class PE:
                 #
                 if data[2 * i + 1] != checksum:
                     self.__warnings.append('Rich Header corrupted')
+                    self.__generic_warnings.append('Rich Header corrupted')
                 break
 
             # header values come by pairs
@@ -2161,6 +2182,11 @@ class PE:
         """
 
         return self.__warnings
+
+
+    def get_generic_warnings(self):
+        """Return the list of generic warnings."""
+        return self.__generic_warnings
 
 
     def show_warnings(self):
@@ -2196,7 +2222,7 @@ class PE:
         provided the data will be returned as a BytesIO object.
         """
         # this code was reference to the "simonzack/pefile-py3k".
-        
+
         if isinstance(self.__data__,io.BytesIO):
             file_data = self.__data__
         else:
@@ -2249,15 +2275,20 @@ class PE:
                 self.__warnings.append(
                     ('Invalid section %d. ' % i) +
                     'Contents are null-bytes.')
+                self.__generic_warnings.append(
+                    'Invalid section. Contents are null-bytes.')
                 break
             section.__unpack__(section_data)
             self.__structures__.append(section)
+            section_name = section.Name.decode('utf-8', 'ignore').rstrip('\x00')
 
             if section.SizeOfRawData+section.PointerToRawData > len(self.__data__):
                 simultaneous_errors += 1
                 self.__warnings.append(
                     ('Error parsing section %d. ' % i) +
                     'SizeOfRawData is larger than file.')
+                self.__generic_warnings.append(
+                    'Error parsing section. SizeOfRawData > file.')
 
             if self.adjust_FileAlignment( section.PointerToRawData,
                 self.OPTIONAL_HEADER.FileAlignment ) > len(self.__data__):
@@ -2265,12 +2296,16 @@ class PE:
                 self.__warnings.append(
                     ('Error parsing section %d. ' % i) +
                     'PointerToRawData points beyond the end of the file.')
+                self.__generic_warnings.append(
+                    'Error parsing section. PointerToRawData points beyond EOF')
 
             if section.Misc_VirtualSize > 0x10000000:
                 simultaneous_errors += 1
                 self.__warnings.append(
                     ('Suspicious value found parsing section %d. ' % i) +
                     'VirtualSize is extremely large > 256MiB.')
+                self.__generic_warnings.append(
+                    'Suspicious value when parsing. VirtualSize is extremely large.')
 
 
             if self.adjust_SectionAlignment( section.VirtualAddress,
@@ -2279,6 +2314,8 @@ class PE:
                 self.__warnings.append(
                     ('Suspicious value found parsing section %d. ' % i) +
                     'VirtualAddress is beyond 0x10000000.')
+                self.__generic_warnings.append(
+                    'Suspicious value when parsing section. VirtualAddress is beyond 0x10000000')
 
             if ( self.OPTIONAL_HEADER.FileAlignment != 0 and
                 ( section.PointerToRawData % self.OPTIONAL_HEADER.FileAlignment) != 0):
@@ -2288,10 +2325,13 @@ class PE:
                     'PointerToRawData should normally be ' +
                     'a multiple of FileAlignment, this might imply the file ' +
                     'is trying to confuse tools which parse this incorrectly.')
-
+                self.__generic_warnings.append(
+                    'Error parsing section. PointerToRawData should be a multiple of FileAlignment')
 
             if simultaneous_errors >= MAX_SIMULTANEOUS_ERRORS:
                 self.__warnings.append('Too many warnings parsing section. Aborting.')
+                self.__generic_warnings.append(
+                    'Too many warnings parsing section. Aborting.')
                 break
 
 
@@ -2312,6 +2352,8 @@ class PE:
                         ('Suspicious flags set for section %d. ' % i) +
                         'Both IMAGE_SCN_MEM_WRITE and IMAGE_SCN_MEM_EXECUTE are set. ' +
                         'This might indicate a packed executable.')
+                    self.__generic_warnings.append(
+                        'Suspicious flags set for section. Both IMAGE_SCN_MEM_WRITE and IMAGE_SCN_MEM_EXECUTE are set')
 
 
             self.sections.append(section)
@@ -2415,6 +2457,8 @@ class PE:
 
                 self.__warnings.append(
                     'The Bound Imports directory exists but can\'t be parsed.')
+                self.__generic_warnings.append(
+                    'The Bound Imports directory exists but can\'t be parsed.')
 
                 return
 
@@ -2442,6 +2486,8 @@ class PE:
                 self.__warnings.append(
                     'RVA of IMAGE_BOUND_IMPORT_DESCRIPTOR points to an invalid address: %x' %
                     rva)
+                self.__generic_warnings.append(
+                    'RVA of IMAGE_BOUND_IMPORT_DESCRIPTOR points to an invalid address')
                 return
 
 
@@ -2516,6 +2562,7 @@ class PE:
             self.__warnings.append(
                 'Invalid TLS information. Can\'t read ' +
                 'data at RVA: 0x%x' % rva)
+            self.__generic_warnings.append('Invalid TLS information.')
             tls_struct = None
 
         if not tls_struct:
@@ -2542,6 +2589,7 @@ class PE:
             self.__warnings.append(
                 'Invalid LOAD_CONFIG information. Can\'t read ' +
                 'data at RVA: 0x%x' % rva)
+            self.__generic_warnings.append('Invalid LOAD_CONFIG information.')
             load_config_struct = None
 
         if not load_config_struct:
@@ -2572,6 +2620,7 @@ class PE:
                 self.__warnings.append(
                     'Invalid relocation information. Can\'t read ' +
                     'data at RVA: 0x%x' % rva)
+                self.__generic_warnings.append('Invalid relocation information. Cannot read data.')
                 rlc = None
 
             if not rlc:
@@ -2582,6 +2631,8 @@ class PE:
                 self.__warnings.append(
                     'Invalid relocation information. VirtualAddress outside' +
                     ' of Image: 0x%x' % rlc.VirtualAddress)
+                self.__generic_warnings.append(
+                    'Invalid relocation information. VirtualAddress outside of image.')
                 break
 
             # rlc.SizeOfBlock must be less or equal than the size of the image
@@ -2590,6 +2641,8 @@ class PE:
                 self.__warnings.append(
                     'Invalid relocation information. SizeOfBlock too large' +
                     ': %d' % rlc.SizeOfBlock)
+                self.__generic_warnings.append(
+                    'Invalid relocation information. SizeOfBlock too large')
                 break
 
             reloc_entries = self.parse_relocations(
@@ -2632,6 +2685,8 @@ class PE:
                 self.__warnings.append(
                     'Overlapping offsets in relocation data ' +
                     'data at RVA: 0x%x' % (reloc_offset+rva))
+                self.__generic_warnings.append(
+                    'Overlapping offsets in relocation data')
                 break
             if len(offsets_and_type) >= 1000:
                 offsets_and_type.pop()
@@ -2661,6 +2716,7 @@ class PE:
                 self.__warnings.append(
                     'Invalid debug information. Can\'t read ' +
                     'data at RVA: 0x%x' % rva)
+                self.__generic_warnings.append('Invalid debug information.')
                 return None
 
             dbg = self.__unpack_data__(
@@ -2716,6 +2772,8 @@ class PE:
             self.__warnings.append(
                 'Invalid resources directory. Can\'t read ' +
                 'directory data at RVA: 0x%x' % rva)
+            self.__generic_warnings.append(
+                'Invalid resources directory. Cannot read.')
             return None
 
         # Get the resource directory structure, that is, the header
@@ -2731,6 +2789,8 @@ class PE:
             self.__warnings.append(
                 'Invalid resources directory. Can\'t parse ' +
                 'directory data at RVA: 0x%x' % rva)
+            self.__generic_warnings.append(
+                'Invalid resources directory. Cannot parse directory data.')
             return None
 
         dir_entries = []
@@ -2751,6 +2811,8 @@ class PE:
                 'Error parsing the resources directory. '
                 'The directory contains %d entries (>%s)' %
                 (number_of_entries, MAX_ALLOWED_ENTRIES) )
+            self.__generic_warnings.append(
+                'Invalid resources directory. Contains more entries than max allowed.')
             return None
 
         strings_to_postprocess = list()
@@ -2767,6 +2829,8 @@ class PE:
                     'Error parsing the resources directory, '
                     'Entry %d is invalid, RVA = 0x%x. ' %
                     (idx, rva) )
+                self.__generic_warnings.append(
+                    'Invalid resources directory. Cannot parse because of invalid entries.')
                 break
 
             entry_name = None
@@ -2791,6 +2855,8 @@ class PE:
                             'attempting to read entry name. '
                             'Entry names overlap 0x%x' %
                             (ustr_offset) )
+                        self.__generic_warnings.append(
+                            'Error parsing the resources directory, attempting to read overlapping entry names.')
                         break
 
                     last_name_begin_end = (ustr_offset, ustr_offset+entry_name.get_pascal_16_length())
@@ -2803,6 +2869,8 @@ class PE:
                         'attempting to read entry name. '
                         'Can\'t read unicode string at offset 0x%x' %
                         (ustr_offset) )
+                    self.__generic_warnings.append(
+                        'Error parsing the resources directory, cannot read unicode string.')
 
 
             if res.DataIsDirectory:
@@ -2930,6 +2998,8 @@ class PE:
             self.__warnings.append(
                 'Error parsing a resource directory data entry, ' +
                 'the RVA is invalid: 0x%x' % ( rva ) )
+            self.__generic_warnings.append(
+                'Error parsing the resources directory data entry, the RVA is invalid.')
             return None
 
         data_entry = self.__unpack_data__(
@@ -3016,7 +3086,7 @@ class PE:
                 'attempting to read VS_VERSION_INFO string. Can\'t ' +
                 'read unicode string at offset 0x%x' % (
                 ustr_offset ) )
-
+            self.__generic_warnings.append('Error parsing version information.')
             versioninfo_string = None
 
         # If the structure does not contain the expected name, it's assumed to be invalid
@@ -3024,6 +3094,7 @@ class PE:
         if versioninfo_string != 'VS_VERSION_INFO':
 
             self.__warnings.append('Invalid VS_VERSION_INFO block')
+            self.__generic_warnings.append('Invalid VS_VERSION_INFO block.')
             return
 
 
@@ -3082,6 +3153,8 @@ class PE:
             if stringfileinfo_struct is None:
                 self.__warnings.append(
                     'Error parsing StringFileInfo/VarFileInfo struct' )
+                self.__generic_warnings.append(
+                    'Error parsing StringFileInfo/VarFileInfo struct' )
                 return None
 
             # Get the subsequent string defining the structure.
@@ -3095,6 +3168,8 @@ class PE:
                     'Error parsing the version information, ' +
                     'attempting to read StringFileInfo string. Can\'t ' +
                     'read unicode string at offset 0x%x' %  ( ustr_offset ) )
+                self.__generic_warnings.append(
+                    'Error parsing the version information, attempting to read StringFileInfo string')
                 break
 
             # Set such string as the Key attribute
@@ -3141,6 +3216,8 @@ class PE:
                                 'Error parsing the version information, ' +
                                 'attempting to read StringTable string. Can\'t ' +
                                 'read unicode string at offset 0x%x' % ( ustr_offset ) )
+                            self.__generic_warnings.append(
+                                'Error parsing the version information, attempting to read StringTable string.')
                             break
 
                         stringtable_struct.LangID = stringtable_string
@@ -3176,6 +3253,8 @@ class PE:
                                     'Error parsing the version information, ' +
                                     'attempting to read StringTable Key string. Can\'t ' +
                                     'read unicode string at offset 0x%x' % ( ustr_offset ) )
+                                self.__generic_warnings.append(
+                                    'Error parsing the version information, attempting to read StringTable Key string.')
                                 break
 
                             value_offset = self.dword_align(
@@ -3193,6 +3272,8 @@ class PE:
                                     'attempting to read StringTable Value string. ' +
                                     'Can\'t read unicode string at offset 0x%x' % (
                                     ustr_offset ) )
+                                self.__generic_warnings.append(
+                                    'Error parsing the version information, attempting to read StringTable Value string.')
                                 break
 
                             if string_struct.Length == 0:
@@ -3266,6 +3347,8 @@ class PE:
                                 'Error parsing the version information, ' +
                                 'attempting to read VarFileInfo Var string. ' +
                                 'Can\'t read unicode string at offset 0x%x' % (ustr_offset))
+                            self.__generic_warnings.append(
+                                'Error parsing the version information, attempting to read VarFileInfo Var string.')
                             break
 
                         if var_string is None:
@@ -3326,6 +3409,7 @@ class PE:
         except PEFormatError:
             self.__warnings.append(
                 'Error parsing export directory at RVA: 0x%x' % ( rva ) )
+            self.__generic_warnings.append('Error parsing export directory')
             return
 
         if not export_dir:
@@ -3348,6 +3432,7 @@ class PE:
         except PEFormatError:
             self.__warnings.append(
                 'Error parsing export directory at RVA: 0x%x' % ( rva ) )
+            self.__generic_warnings.append('Error parsing export directory')
             return
 
         exports = []
@@ -3359,6 +3444,7 @@ class PE:
             self.__warnings.append(
                 'RVA AddressOfNames in the export directory points to an invalid address: %x' %
                 export_dir.AddressOfNames)
+            self.__generic_warnings.append('RVA AddressOfNames in the export directory points to an invalid address')
             return
         else:
             safety_boundary = section.VirtualAddress + len(section.get_data()) - export_dir.AddressOfNames
@@ -3432,6 +3518,8 @@ class PE:
             self.__warnings.append(
                 'RVA AddressOfFunctions in the export directory points to an invalid address: %x' %
                 export_dir.AddressOfFunctions)
+            self.__generic_warnings.append(
+                'RVA AddressOfFunctions in the export directory points to an invalid address')
             return
         else:
             safety_boundary = section.VirtualAddress + len(section.get_data()) - export_dir.AddressOfFunctions
@@ -3490,6 +3578,8 @@ class PE:
             except PEFormatError as e:
                 self.__warnings.append(
                     'Error parsing the Delay import directory at RVA: 0x%x' % ( rva ) )
+                self.__generic_warnings.append(
+                    'Error parsing the Delay import directory')
                 break
 
             file_offset = self.get_offset_from_rva(rva)
@@ -3522,6 +3612,8 @@ class PE:
                 self.__warnings.append(
                     'Error parsing the Delay import directory. ' +
                     'Invalid import data at RVA: 0x%x (%s)' % ( rva, e.value) )
+                self.__generic_warnings.append(
+                    'Error parsing the Delay import directory. Invalid import data.')
                 break
 
             if not import_data:
@@ -3587,6 +3679,8 @@ class PE:
             except PEFormatError as e:
                 self.__warnings.append(
                     'Error parsing the import directory at RVA: 0x%x' % ( rva ) )
+                self.__generic_warnings.append(
+                    'Error parsing the import directory')
                 break
 
             file_offset = self.get_offset_from_rva(rva)
@@ -3617,6 +3711,7 @@ class PE:
                 self.__warnings.append(
                     'Error parsing the import directory. ' +
                     'Invalid Import data at RVA: 0x%x (%s)' % ( rva, e.value ) )
+                self.__generic_warnings.append('Error parsing the import directory.')
                 break
 
             if not import_data:
@@ -3651,6 +3746,8 @@ class PE:
         if suspicious_imports_count == len(suspicious_imports) and total_symbols < 20:
             self.__warnings.append(
                 'Imported symbols contain entries typical of packed executables.' )
+            self.__generic_warnings.append(
+                'Imported symbols contain entries typical of packed executables.')
 
         return import_descs
 
@@ -3826,6 +3923,8 @@ class PE:
             if max_length is not None and rva >= start_rva+max_length:
                 self.__warnings.append(
                     'Error parsing the import table. Entries go beyond bounds.')
+                self.__generic_warnings.append(
+                    'Error parsing the import table. Entries go beyond bounds.')
                 break
 
             # if we see too many times the same entry we assume it could be
@@ -3849,6 +3948,8 @@ class PE:
                 self.__warnings.append(
                     'Error parsing the import table. ' +
                     'Invalid data at RVA: 0x%x' % rva)
+                self.__generic_warnings.append(
+                    'Error parsing the import tables. Invalid data.')
                 return None
 
             thunk_data = self.__unpack_data__(
@@ -3859,11 +3960,20 @@ class PE:
             # to be legitimate data.
             # Seen in PE with SHA256:
             # 5945bb6f0ac879ddf61b1c284f3b8d20c06b228e75ae4f571fa87f5b9512902c
+            if thunk_data is None:
+                err_str = 'Error parsing import table'
+                self.__warnings.append(err_str)
+                self.__generic_warnings.append(err_str)
+                return None
+
             if thunk_data.AddressOfData >= start_rva and thunk_data.AddressOfData <= rva:
                 self.__warnings.append(
                     'Error parsing the import table. ' +
                     'AddressOfData overlaps with THUNK_DATA for ' +
                     'THUNK at RVA 0x%x' % ( rva ) )
+                self.__generic_warnings.append(
+                    'Error parsing the import table. AddressOfData overlaps with THUNK_DATA')
+
                 break
 
             if thunk_data and thunk_data.AddressOfData:
@@ -3928,7 +4038,7 @@ class PE:
 
         # Collect all sections in one code block
         #mapped_data = self.header
-        mapped_data = '' + self.__data__[:]
+        mapped_data = b'' + self.__data__[:]
         for section in self.sections:
 
             # Miscellaneous integrity tests.
@@ -3955,7 +4065,7 @@ class PE:
             padding_length = VirtualAddress_adj - len(mapped_data)
 
             if padding_length>0:
-                mapped_data += '\0'*padding_length
+                mapped_data += b'\0'*padding_length
             elif padding_length<0:
                 mapped_data = mapped_data[:padding_length]
 
@@ -5226,6 +5336,8 @@ class PE:
                 self.__warnings.append(
                     'If FileAlignment > 0x200 it should be a power of 2. Value: %x' % (
                         file_alignment)  )
+                self.__generic_warnings.append(
+                    'If FileAlignment > 0x200 it should be a power of 2.')
                 FileAlignment_Warning = True
 
         if file_alignment < FILE_ALIGNEMNT_HARDCODED_VALUE:
@@ -5246,6 +5358,8 @@ class PE:
                 self.__warnings.append(
                     'If FileAlignment(%x) < 0x200 it should equal SectionAlignment(%x)' % (
                         file_alignment, section_alignment)  )
+                self.__generic_warnings.append(
+                    'FileAlignment != SectionAlignment')
                 SectionAlignment_Warning = True
 
         if section_alignment < 0x1000: # page size
