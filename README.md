@@ -8,3 +8,5 @@ This project was converted from 'pefile'.
 
 'write' function was reference to the "simonzack/pefile-py3k".
 ( pefile-py3k - https://github.com/simonzack/pefile-py3k )
+
+Added general warnings, and entropy library. It can be installed with pip3 install entropy.
