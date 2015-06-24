@@ -3664,7 +3664,7 @@ class PE:
 
                 impstrs.append('%s.%s' % (libname.lower(),funcname.lower()))
 
-        return hashlib.md5( ','.join( impstrs ) ).hexdigest()
+        return hashlib.md5( ','.join( impstrs ).encode('utf-8') ).hexdigest()
 
 
     def parse_import_directory(self, rva, size):
