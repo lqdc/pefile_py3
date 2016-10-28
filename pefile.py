@@ -5177,7 +5177,7 @@ class PE:
         # assigning values to header fields as those are not automatically
         # updated upon assignment.
         #
-        self.__data__ = self.write()
+        # self.__data__ = self.write()
 
         # Get the offset to the CheckSum field in the OptionalHeader
         #
